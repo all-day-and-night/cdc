@@ -1,0 +1,17 @@
+{
+  "name": "mongodb-cdc-sink",
+  "config": {
+    "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
+    "tasks.max": "3",
+
+    "connection.uri": "mongodb://root:rootpass@mongodb:27017/?authSource=admin",
+    "database": "targetdb",
+    
+    "topics": "customers_schemaless,orders_schemaless,products_schemaless",
+    
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter.schemas.enable": "false"
+  }
+}

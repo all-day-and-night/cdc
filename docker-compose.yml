@@ -1,0 +1,158 @@
+version: "3.8"
+
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    platform: linux/arm64
+    container_name: kafka
+    ports:
+      - "9092:9092"   # 외부 접근
+    environment:
+      # KRaft 모드 설정
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:9093'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      
+      # 리스너 설정
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:9093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      
+      # 클러스터 ID (KRaft 필수, 고정값 사용)
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      
+      # 단일 브로커 설정
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      
+      # 로그 및 성능 설정
+      KAFKA_LOG_DIRS: '/var/lib/kafka/data'
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    platform: linux/arm64
+    container_name: kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+
+  connect:
+    build:
+      context: ./connect
+      dockerfile: Dockerfile
+    platform: linux/arm64
+    container_name: connect
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres-source:
+        condition: service_healthy
+      postgres-target:
+        condition: service_healthy
+    ports:
+      - "8083:8083"  # Kafka Connect REST
+    environment:
+      BOOTSTRAP_SERVERS: "kafka:29092"
+      GROUP_ID: "connect-cluster"
+      CONFIG_STORAGE_TOPIC: "_connect-configs"
+      OFFSET_STORAGE_TOPIC: "_connect-offsets"
+      STATUS_STORAGE_TOPIC: "_connect-status"
+      # 단일 브로커 환경 기본값
+      CONNECT_REST_ADVERTISED_HOST_NAME: "connect"
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: "1"
+      # JSON 컨버터(스키마 off) – 예시 단순화를 위해
+      KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      # 플러그인 경로
+      CONNECT_PLUGIN_PATH: "/kafka/connect"
+    volumes:
+      - connect-data:/kafka
+    restart: unless-stopped
+    # 메모리 조정(선택)
+    # environment:
+    #   KAFKA_HEAP_OPTS: "-Xms512m -Xmx1g"
+
+  postgres-source:
+    image: postgres:16-alpine
+    platform: linux/arm64
+    container_name: postgres-source
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: src_user
+      POSTGRES_PASSWORD: src_pass
+      POSTGRES_DB: srcdb
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical" # 논리 디코딩 수행 -> Row 레벨의 변경사항 기록  
+      - "-c"
+      - "max_wal_senders=10" # 논리 복제 슬롯에서 변경 사항을 Kafka로 전송하는 프로세스 수 설정 / 복제 슬롯과 비슷하게 설정
+      - "-c"
+      - "max_replication_slots=10" # connector가 DB에 연결하고 변경 사항 구독을 위해 복제 슬롯 필요 
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U src_user -d srcdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  postgres-target:
+    image: postgres:16-alpine
+    platform: linux/arm64
+    container_name: postgres-target
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: dst_user
+      POSTGRES_PASSWORD: dst_pass
+      POSTGRES_DB: dstdb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dst_user -d dstdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  mongodb:
+    image: mongo:7.0
+    platform: linux/arm64
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpass
+      MONGO_INITDB_DATABASE: targetdb
+    volumes:
+      - mongo-data:/data/db
+
+
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  connect-data:
+  mongo-data:

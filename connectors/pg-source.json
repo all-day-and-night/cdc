@@ -1,0 +1,24 @@
+{
+  "name": "postgres-cdc-source",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    
+    "topic.prefix": "src_server",
+    
+    "database.hostname": "postgres-source", 
+    "database.port": "5432",
+    "database.user": "src_user",
+    "database.password": "src_pass",
+    "database.dbname": "srcdb",
+    "database.server.name": "src_server",
+    
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium_slot_src",
+    "slot.drop.on.stop": "true",
+    
+    "snapshot.mode": "initial", 
+    
+    "schema.include.list": "public" 
+  }
+}
